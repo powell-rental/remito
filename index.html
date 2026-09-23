@@ -1,12 +1,18 @@
 <!DOCTYPE html>
 <!--
   ============================================================
-  Remito Powell — v31
+  Remito Powell — v32
   ------------------------------------------------------------
   App de campo offline. Corre como file:/// en la tablet Android
   y, desde v31, también instalada como PWA desde una URL (celulares
   de los socios, iPhone o Android). NO corre bajo Apps Script: el
   sanitizer Caja NO aplica.
+  CHANGELOG v32 (2026-09-23) — BOTÓN "🔌 probar" (conexión sin cargar nada):
+   Prueba señal → endpoint → token → lectura del ERP con la acción
+   'catalogo' y dice "✅ Conectado como Julian · próximo remito R-022".
+   NO es un remito de test a propósito: uno real consumiría N°, dejaría
+   filas en Remitos y ensuciaría Dashboard y diff de checklist. Se corre
+   solo al pegar el token. Pareja: Remito Sync v2.5 (devuelve `quien`).
   CHANGELOG v31 (2026-09-23) — LA APP SE PUEDE INSTALAR EN UN CELULAR:
    POR QUÉ: un socio tiene que poder hacer el remito cuando Erick no
      llega. En iPhone un HTML suelto no persiste localStorage (se pierde
@@ -189,7 +195,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Remito Powell v31</title>
+  <title>Remito Powell v32</title>
   <!-- v31: PWA. En file:/// estos links no molestan; bajo https hacen instalable la app. -->
   <link rel="manifest" href="manifest.webmanifest"/>
   <link rel="apple-touch-icon" href="icon-192.png"/>
@@ -435,6 +441,7 @@
       <div class="row" style="gap:10px;align-items:center">
         <span id="autosaveIndicator">💾 guardado</span>
         <span id="syncBadge" title="Sync de remitos al ERP" style="font-size:.82rem;color:var(--muted)"></span>
+        <span id="btnProbarSync" title="Prueba el camino al ERP sin cargar nada" style="font-size:.82rem;cursor:pointer;color:var(--accent)">🔌 probar</span>
         <button id="btnNuevoPlantilla" class="btn" type="button">📋 Nuevo</button>
         <button id="btnDownloadHTML" class="btn" type="button">⬇️ HTML</button>
         <div class="dark-toggle" id="darkToggle">
@@ -1769,8 +1776,8 @@ function syncToken(){try{return (localStorage.getItem(SYNC_TKEY)||'').trim();}ca
 function pedirToken(){
   const actual=syncToken();
   const v=prompt('Token de sincronización con el ERP\n\n'+
-    'Se pide una sola vez por dispositivo. Lo generás en Apps Script → proyecto '+
-    '"Powell Remito Sync" → rotarTokenSync().\n\n'+
+    'Se pide una sola vez por dispositivo. Te lo pasa Erick (Apps Script → proyecto '+
+    '"Powell Remito Sync" → crearTokenJulian() / rotarTokenSync()).\n\n'+
     'Dejalo vacío para borrarlo de este dispositivo.', actual);
   if(v===null)return false;                 // canceló
   try{
@@ -1779,8 +1786,41 @@ function pedirToken(){
     toast(t?'🔑 Token guardado en este dispositivo':'🔑 Token borrado de este dispositivo');
   }catch(e){toast('⚠ No se pudo guardar el token');return false;}
   syncBadgeUpd();
-  if(syncToken()){trySyncQueue();fetchCatalogo();}
+  // v32: recién pegado el token, se prueba solo — así un token mal copiado se
+  // descubre en el momento y no el día que hay un remito real en la cola.
+  if(syncToken()){probarConexion();trySyncQueue();fetchCatalogo();}
   return true;
+}
+
+// v32 — PROBAR CONEXIÓN SIN CARGAR NADA.
+// QUÉ HACE: recorre el mismo camino que un remito (señal → endpoint → token → lectura
+//   del ERP) usando la acción 'catalogo', que NO escribe: no consume N° de remito, no
+//   deja filas en la hoja Remitos, no gasta cuota diaria. Un remito "de test" real sí
+//   haría todo eso y ensuciaría Dashboard, diff de checklist y vínculo con operaciones.
+// LEE: token de localStorage, cola local. ESCRIBE: nada (solo el toast).
+// Lo que NO prueba: el alta de la fila y la subida del PDF — eso lo prueba cada
+//   remito real, y si falla queda en la cola sin perderse.
+async function probarConexion(){
+  if(!ERP_SYNC_URL){toast('⚠ Esta copia no tiene endpoint de sync configurado',5000);return;}
+  if(!navigator.onLine){toast('📵 Sin señal — los remitos se guardan y salen solos al volver',5000);return;}
+  if(!syncToken()){toast('🔑 Falta el token: tocá el indicador de sync',5000);return;}
+  toast('🔌 Probando conexión con el ERP…',8000);
+  let j;
+  try{
+    const resp=await fetch(ERP_SYNC_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'catalogo',token:syncToken()})});
+    j=await resp.json();
+  }catch(e){toast('⚠ No llegó al ERP (red o servidor). Probá de nuevo en un rato',6000);return;}
+  if(!j||!j.ok){
+    const err=(j&&j.error)||'error desconocido';
+    toast(err==='No autorizado'?'⛔ Token incorrecto o revocado — pedile uno nuevo a Erick':'⚠ El ERP respondió: '+err,7000);
+    return;
+  }
+  const n=syncQueue().length;
+  const prox=parseInt(j.proximoNro,10);
+  toast('✅ Conectado'+(j.quien?' como '+j.quien:'')+
+        (prox>0?' · próximo remito R-'+String(prox).padStart(3,'0'):'')+
+        (n>0?' · '+n+' en cola, saliendo ahora':''),7000);
+  if(n>0)trySyncQueue();
 }
 const SYNC_QKEY='powell_sync_queue';
 const SYNC_PDF_MAX=2500000; // ~2.5 MB de base64: más grande, se encola sin PDF
@@ -1793,6 +1833,7 @@ function syncBadgeUpd(){
   b.style.cursor='pointer';
   b.title='Tocar para cargar o cambiar el token de sincronización';
   b.onclick=pedirToken;
+  const bp=document.getElementById('btnProbarSync');if(bp)bp.onclick=probarConexion;
   const n=syncQueue().length;
   // v27: sin token no se puede sincronizar, pero NADA se pierde — la cola espera.
   if(!syncToken()){

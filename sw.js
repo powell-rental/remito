@@ -7,7 +7,7 @@
 //   offline de la app ya maneja eso, y cachear respuestas del ERP sería guardar
 //   datos en un lugar que nadie limpia.
 // EN CADA RELEASE DE LA APP: subir CACHE_VERSION (regla del CLAUDE.md).
-const CACHE_VERSION = 'remito-v31';
+const CACHE_VERSION = 'remito-v32';
 const PRECACHE = ['./', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 // Instalación: guarda el esqueleto para el primer arranque sin señal.
