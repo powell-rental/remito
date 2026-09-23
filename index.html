@@ -7,6 +7,12 @@
   y, desde v31, también instalada como PWA desde una URL (celulares
   de los socios, iPhone o Android). NO corre bajo Apps Script: el
   sanitizer Caja NO aplica.
+  CHANGELOG v33 (2026-09-23) — REVISIÓN DE SEGURIDAD (app pública):
+   1. buildPrintable() y buildSummaryTicket(): todo dato de cliente/
+      catálogo pasa por esc(). Cierra la mitad abierta del hallazgo 7
+      (v29 había dejado el PDF afuera). Era XSS con acceso al token.
+   2. CSP en <meta>: connect-src solo a Apps Script, img-src solo
+      local/data/blob. Si algo se cuela, no puede sacar el token afuera.
   CHANGELOG v32 (2026-09-23) — BOTÓN "🔌 probar" (conexión sin cargar nada):
    Prueba señal → endpoint → token → lectura del ERP con la acción
    'catalogo' y dice "✅ Conectado como Julian · próximo remito R-022".
@@ -195,7 +201,13 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Remito Powell v32</title>
+  <title>Remito Powell v33</title>
+  <!-- v33 — CSP: aunque se cuele un XSS, el navegador NO deja mandar nada a otro
+       servidor que el sync de Apps Script (connect-src). Es la red de seguridad del
+       token en localStorage. 'unsafe-inline' hace falta porque toda la app es inline;
+       lo que protege acá es connect-src/img-src, no script-src.
+       ⚠️ Si algún día la app tiene que hablar con otro servidor, agregarlo ACÁ. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"/>
   <!-- v31: PWA. En file:/// estos links no molestan; bajo https hacen instalable la app. -->
   <link rel="manifest" href="manifest.webmanifest"/>
   <link rel="apple-touch-icon" href="icon-192.png"/>
@@ -1168,7 +1180,7 @@ function createEquipoBlock(idx){
       <div class="col-4"><label>Identificación</label><select id="${uid}_ident">${OPT.identificacion.map(v=>`<option${v===eq.ident?' selected':''}>` +v+'</option>').join('')}</select></div>
     </div>
     <div class="gps-row" style="margin-top:12px">
-      <label class="pill">📍 Coordenadas <input id="${uid}_coords" readonly style="width:200px" value="${eq.coords||''}"/></label>
+      <label class="pill">📍 Coordenadas <input id="${uid}_coords" readonly style="width:200px" value="${esc(eq.coords)}"/></label>
       <button type="button" class="btn primary" data-eq-gps="${idx}">📍 Ubicación</button>
       <small id="${uid}_gpsInfo">${eq.gpsInfo||''}</small>
     </div>
@@ -1349,6 +1361,7 @@ addEquipo();
 $('#btnAgregarEquipo').onclick=()=>{addEquipo();toast('Cisterna agregada');};
 
 function buildSummaryTicket(){
+  // v33: los datos del cliente/catálogo van por esc() — mismo XSS que buildPrintable.
   equipos=equipos.map((eq,i)=>collectEquipo(i));
   const d={
     remitoNro:$('#remitoNro').value||'',
@@ -1365,13 +1378,13 @@ function buildSummaryTicket(){
 
   let html='<div class="summary-ticket">';
   html+=`<div class="summary-header">
-    <div class="summary-title">📋 REMITO #${d.remitoNro||'—'}</div>
-    <div style="text-align:right;font-size:.9rem;color:var(--muted)">${d.mov||'Salida'}<br>${d.fecha||''} ${d.hora||''}</div>
+    <div class="summary-title">📋 REMITO #${esc(d.remitoNro)||'—'}</div>
+    <div style="text-align:right;font-size:.9rem;color:var(--muted)">${esc(d.mov||'Salida')}<br>${esc(d.fecha)} ${esc(d.hora)}</div>
   </div>`;
 
   html+='<div class="summary-section">';
-  html+=`<div class="summary-item"><span class="summary-icon ${d.cliente.nombre?'ok':'err'}">${d.cliente.nombre?'✓':'✕'}</span><strong>Cliente:</strong> ${d.cliente.nombre||'<em style="color:var(--err)">Faltante</em>'}</div>`;
-  if(d.cliente.email) html+=`<div class="summary-item" style="padding-left:38px;font-size:.85rem;color:var(--muted)">${d.cliente.email}</div>`;
+  html+=`<div class="summary-item"><span class="summary-icon ${d.cliente.nombre?'ok':'err'}">${d.cliente.nombre?'✓':'✕'}</span><strong>Cliente:</strong> ${esc(d.cliente.nombre)||'<em style="color:var(--err)">Faltante</em>'}</div>`;
+  if(d.cliente.email) html+=`<div class="summary-item" style="padding-left:38px;font-size:.85rem;color:var(--muted)">${esc(d.cliente.email)}</div>`;
   html+='</div>';
 
   html+='<div class="summary-section">';
@@ -1381,7 +1394,7 @@ function buildSummaryTicket(){
     const gpsOk=!!eq.coords;
     const checkOk=eq.rows.some(r=>r.estado!=='-');
     html+=`<div class="summary-item" style="padding-left:38px;font-size:.88rem">
-      • ${eq.ident} (${eq.tipo}) — ${fotosCount} foto${fotosCount!==1?'s':''} ${gpsOk?'📍':''} ${checkOk?'':'<span style="color:var(--warn)">⚠ Sin revisar</span>'}
+      • ${esc(eq.ident)} (${esc(eq.tipo)}) — ${fotosCount} foto${fotosCount!==1?'s':''} ${gpsOk?'📍':''} ${checkOk?'':'<span style="color:var(--warn)">⚠ Sin revisar</span>'}
     </div>`;
   });
   html+='</div>';
@@ -1393,12 +1406,12 @@ function buildSummaryTicket(){
   html+='</div>';
 
   html+='<div class="summary-section">';
-  html+=`<div class="summary-item"><span class="summary-icon ${d.vehiculo?'ok':'warn'}">${d.vehiculo?'✓':'!'}</span><strong>Vehículo:</strong> ${d.vehiculo||'<em style="color:var(--muted)">No especificado</em>'} ${d.dominio?'('+d.dominio+')':''}</div>`;
+  html+=`<div class="summary-item"><span class="summary-icon ${d.vehiculo?'ok':'warn'}">${d.vehiculo?'✓':'!'}</span><strong>Vehículo:</strong> ${esc(d.vehiculo)||'<em style="color:var(--muted)">No especificado</em>'} ${d.dominio?'('+esc(d.dominio)+')':''}</div>`;
   html+='</div>';
 
   if(d.otras){
     html+='<div class="summary-section">';
-    html+=`<div class="summary-item"><span class="summary-icon ok">💬</span><strong>Observaciones:</strong> ${d.otras.substring(0,60)}${d.otras.length>60?'...':''}</div>`;
+    html+=`<div class="summary-item"><span class="summary-icon ok">💬</span><strong>Observaciones:</strong> ${esc(d.otras.substring(0,60))}${d.otras.length>60?'...':''}</div>`;
     html+='</div>';
   }
 
@@ -1543,15 +1556,22 @@ function validate(){
 
 function fmtDNI(v){if(!v)return'';const d=String(v).replace(/[^0-9]/g,'');if(!d)return'';try{return new Intl.NumberFormat('es-AR').format(Number(d));}catch(e){return d;}}
 
+// v33 — TODO dato que se interpola pasa por esc() (hallazgo 7 de la auditoría
+// 2026-09-13, la mitad que había quedado abierta en v29). Antes era XSS: un
+// vehículo/dominio/aclaración envenenado en el catálogo del ERP se ejecutaba al
+// generar el PDF y podía leer el token de localStorage. Con la app en una URL
+// pública y varios celulares escribiendo en el catálogo, dejó de ser teórico.
+// Los src de imagen también se escapan (cierra el atributo); los data: URL en
+// base64 no tienen & < > " ' así que salen idénticos.
 function buildPrintable(d){
   const logoSrc=localStorage.getItem(LOGO_KEY)||'';
   let html=`<div class="sheet">`;
   
   html+=`<div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div style="display:flex;gap:8px;align-items:center">
-      <img src="${logoSrc}" alt="Powell" style="height:34px;object-fit:contain"/>
+      <img src="${esc(logoSrc)}" alt="Powell" style="height:34px;object-fit:contain"/>
       <div><h2 style="margin:0 0 2px;font-size:20px">REMITO</h2>
-        <div style="font-size:16px;font-weight:700">Nº ${d.remitoNro||''} <span style="font-size:11px;font-weight:400">${d.fecha||''} ${d.hora?'— '+d.hora:''}</span></div>
+        <div style="font-size:16px;font-weight:700">Nº ${esc(d.remitoNro)} <span style="font-size:11px;font-weight:400">${esc(d.fecha)} ${d.hora?'— '+esc(d.hora):''}</span></div>
       </div>
     </div>
     <div style="text-align:right;font-size:11px;color:#444">
@@ -1563,21 +1583,21 @@ function buildPrintable(d){
 
   html+=`<div class="hr"></div>
   <div class="kv">
-    <div><strong>Nombre/Empresa</strong></div><div>${d.cliente?.nombre||''}</div>
-    <div><strong>Email</strong></div><div>${d.cliente?.email||''}</div>
-    <div><strong>Localidad</strong></div><div>${d.cliente?.localidad||''}</div>
-    <div><strong>CUIT</strong></div><div>${fmtCUIT(d.cliente?.cuit||'')}</div>
-    <div><strong>Otros Datos</strong></div><div>${d.cliente?.otros||''}</div>
+    <div><strong>Nombre/Empresa</strong></div><div>${esc(d.cliente?.nombre)}</div>
+    <div><strong>Email</strong></div><div>${esc(d.cliente?.email)}</div>
+    <div><strong>Localidad</strong></div><div>${esc(d.cliente?.localidad)}</div>
+    <div><strong>CUIT</strong></div><div>${esc(fmtCUIT(d.cliente?.cuit||''))}</div>
+    <div><strong>Otros Datos</strong></div><div>${esc(d.cliente?.otros)}</div>
   </div>`;
 
   html+=`<div class="hr"></div>
   <div class="box" style="margin:4px 0"><table style="width:100%;border-collapse:collapse;font-size:11px">
-    <tr><td style="border:none;padding:3px 6px;font-weight:600;width:100px">Movimiento:</td><td style="border:none;padding:3px 6px">${d.mov||''}</td></tr>
+    <tr><td style="border:none;padding:3px 6px;font-weight:600;width:100px">Movimiento:</td><td style="border:none;padding:3px 6px">${esc(d.mov)}</td></tr>
   </table></div>`;
 
   d.equipos.forEach((eq,i)=>{
-    html+=`<div class="eq-section-title">🛢️ Cisterna ${i+1} — ${eq.tipo||''} ${eq.cap?'('+eq.cap+')':''} · ${eq.ident||''}</div>`;
-    if(eq.coords) html+=`<div style="font-size:10px;color:#555;margin-bottom:3px">📍 ${eq.coords}</div>`;
+    html+=`<div class="eq-section-title">🛢️ Cisterna ${i+1} — ${esc(eq.tipo)} ${eq.cap?'('+esc(eq.cap)+')':''} · ${esc(eq.ident)}</div>`;
+    if(eq.coords) html+=`<div style="font-size:10px;color:#555;margin-bottom:3px">📍 ${esc(eq.coords)}</div>`;
     
     html+=`<table class="avoid-break" style="margin-bottom:4px"><thead><tr>
       <th style="width:24px">#</th><th style="width:120px;text-align:left">Item</th>
@@ -1594,31 +1614,31 @@ function buildPrintable(d){
       else if(r.estado==='N/A') estadoBadge='<span class="estado-badge na">N/A</span>';
       else estadoBadge='<span class="estado-badge na">—</span>';
       
-      html+=`<tr><td>${ri+1}</td><td style="text-align:left">${label}</td><td>${r.na?'✔':''}</td><td>${estadoBadge}</td><td>${r.cant||''}</td><td style="text-align:left">${r.obs||''}</td></tr>`;
+      html+=`<tr><td>${ri+1}</td><td style="text-align:left">${esc(label)}</td><td>${r.na?'✔':''}</td><td>${estadoBadge}</td><td>${esc(r.cant)}</td><td style="text-align:left">${esc(r.obs)}</td></tr>`;
     });
     html+=`</tbody></table>`;
   });
 
   html+=`<div class="hr"></div>
   <div style="font-size:11px"><strong>OTRAS OBSERVACIONES</strong></div>
-  <div style="min-height:24px;border:1px solid #0002;padding:4px 6px;margin:4px 0;font-size:10px">${d.otras||''}</div>`;
+  <div style="min-height:24px;border:1px solid #0002;padding:4px 6px;margin:4px 0;font-size:10px">${esc(d.otras)}</div>`;
 
   html+=`<div class="hr"></div>
   <div class="two-col avoid-break">
     <div class="box">
       <div style="text-align:center;font-weight:600;margin-bottom:4px;font-size:11px">RECIBIÓ EQUIPO</div>
-      <div class="sigBox"><img src="${d.sigRec||''}" alt="Firma"></div>
+      <div class="sigBox"><img src="${esc(d.sigRec)}" alt="Firma"></div>
       <div class="kv" style="margin-top:4px;font-size:10px">
-        <div><strong>DNI</strong></div><div>${fmtDNI(d.dniRec)}</div>
-        <div><strong>Aclaración</strong></div><div>${d.aclRec||''}</div>
+        <div><strong>DNI</strong></div><div>${esc(fmtDNI(d.dniRec))}</div>
+        <div><strong>Aclaración</strong></div><div>${esc(d.aclRec)}</div>
       </div>
     </div>
     <div class="box">
       <div style="text-align:center;font-weight:600;margin-bottom:4px;font-size:11px">ENTREGÓ EQUIPO</div>
-      <div class="sigBox"><img src="${d.sigEnt||''}" alt="Firma"></div>
+      <div class="sigBox"><img src="${esc(d.sigEnt)}" alt="Firma"></div>
       <div class="kv" style="margin-top:4px;font-size:10px">
-        <div><strong>DNI</strong></div><div>${fmtDNI(d.dniEnt)}</div>
-        <div><strong>Aclaración</strong></div><div>${d.aclEnt||''}</div>
+        <div><strong>DNI</strong></div><div>${esc(fmtDNI(d.dniEnt))}</div>
+        <div><strong>Aclaración</strong></div><div>${esc(d.aclEnt)}</div>
       </div>
     </div>
   </div>`;
@@ -1628,7 +1648,7 @@ function buildPrintable(d){
     <div style="text-align:center;font-weight:600;margin-bottom:3px;font-size:11px">Vehículo de transporte</div>
     <table style="width:100%;border-collapse:collapse;font-size:10px">
       <thead><tr><th>Descripción</th><th>Marca</th><th>Dominio</th></tr></thead>
-      <tbody><tr><td>${d.vehiculo||''}</td><td>${d.marca||''}</td><td>${d.dominio||''}</td></tr></tbody>
+      <tbody><tr><td>${esc(d.vehiculo)}</td><td>${esc(d.marca)}</td><td>${esc(d.dominio)}</td></tr></tbody>
     </table>
   </div>`;
 
@@ -1638,15 +1658,15 @@ function buildPrintable(d){
   if(hasFotos){
     html+=`<div class="sheet pagebreak">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <img src="${logoSrc}" alt="Powell" style="height:24px;object-fit:contain"/>
-        <h3 style="margin:0;font-size:14px">Fotos — Remito Nº ${d.remitoNro||''}</h3>
+        <img src="${esc(logoSrc)}" alt="Powell" style="height:24px;object-fit:contain"/>
+        <h3 style="margin:0;font-size:14px">Fotos — Remito Nº ${esc(d.remitoNro)}</h3>
       </div>`;
     d.equipos.forEach((eq,i)=>{
       if(!(eq.fotos||[]).length)return;
-      html+=`<div style="font-weight:600;font-size:11px;margin:10px 0 6px;color:#2563eb">🛢️ Cisterna ${i+1} — ${eq.tipo||''} ${eq.cap?'('+eq.cap+')':''} · ${eq.ident||''}</div>`;
+      html+=`<div style="font-weight:600;font-size:11px;margin:10px 0 6px;color:#2563eb">🛢️ Cisterna ${i+1} — ${esc(eq.tipo)} ${eq.cap?'('+esc(eq.cap)+')':''} · ${esc(eq.ident)}</div>`;
       html+=`<div class="photos">`;
       eq.fotos.forEach(f=>{
-        html+=`<div class="photos-item"><img src="${f.src}" alt="Foto"/>${f.label?'<div class="photo-label">'+f.label+'</div>':''}</div>`;
+        html+=`<div class="photos-item"><img src="${esc(f.src)}" alt="Foto"/>${f.label?'<div class="photo-label">'+esc(f.label)+'</div>':''}</div>`;
       });
       html+=`</div>`;
     });
